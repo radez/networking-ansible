@@ -434,8 +434,11 @@ class AnsibleMechanismDriver(ml2api.MechanismDriver):
         # TODO What do we do if there is not a mapping available?
         #      should we fail in some way?
         host_id = port[portbindings.HOST_ID]
+        # if type direct get the pci address and append to host_id
+        if AnsibleMechanismDriver._is_port_direct(port):
+            host_id = self._build_sriov_host_id(port, host_id)
         mappings = self.ml2config.port_mappings.get(host_id, [])
-        segmentation_id = network.get('provider:segmentation_id', '')
+        segmentation_id = network.get(provider_net.SEGMENTATION_ID, '')
         return mappings, segmentation_id
 
     def ensure_subports(self, port_id, db):
@@ -523,9 +526,25 @@ class AnsibleMechanismDriver(ml2api.MechanismDriver):
                     # compute host_id
                     def active_port_filter(db_port):
                         for binding in db_port.bindings:
-                            if binding['host'] == port[portbindings.HOST_ID] \
-                                and db_port['id'] != port['id']:
-                                return True
+                            host_id = port[portbindings.HOST_ID]
+                            if AnsibleMechanismDriver._is_port_direct(port):
+                                host_id = self._build_sriov_host_id(
+                                    port, host_id)
+                                db_network = Network.get_object(
+                                    db, id=db_port['network_id'])
+                                mappings, db_segid = self.get_switch_meta(
+                                    db_port, db_network)
+                                # first mapping, should be only one for DIRECT
+                                # port from (switch_name, switch_port) tuple
+                                db_switchport = mappings[0][1]
+                                if db_switchport == switch_port \
+                                    and db_segid == segmentation_id \
+                                    and db_port['id'] != port['id']:
+                                    return True
+                            else:
+                                if binding['host'] == host_id \
+                                    and db_port['id'] != port['id']:
+                                    return True
                         # Default to false
                         return False
 
@@ -745,6 +764,15 @@ class AnsibleMechanismDriver(ml2api.MechanismDriver):
         device_owner = port[c.DEVICE_OWNER]
         return device_owner == c.COMPUTE_NOVA
 
+    def _is_port_direct(port):
+        """Return whether a port is type direct
+
+        :param port: The port to check
+        :returns: Whether the port is type direct
+        """
+        vnic_type = port[portbindings.VNIC_TYPE]
+        return vnic_type == portbindings.VNIC_DIRECT
+
     @staticmethod
     def _is_port_bound(port):
         """Return whether a port is bound by this driver.
@@ -784,5 +812,13 @@ class AnsibleMechanismDriver(ml2api.MechanismDriver):
         else:
             if not AnsibleMechanismDriver._is_port_supported(port):
                 return None
-            local_link_info = port['binding:profile'].get(c.LLI)
+            local_link_info = port[portbindings.PROFILE].get(c.LLI)
         return local_link_info
+
+    @staticmethod
+    def _build_sriov_host_id(port, host_id):
+        profile = port.get(portbindings.PROFILE, {})
+        addr = profile.get('pci_slot')
+        addr = addr.split('.')[0]
+        addr = addr.replace('0000:', '')
+        return '{}-{}'.format(host_id, addr)

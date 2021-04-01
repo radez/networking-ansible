@@ -12,11 +12,12 @@ coordination_uri = etcd://127.0.0.1:2379
 # *** Please read carefully ***
 #
 # - ansible:port_mappings is a a reserved section for mapping compute service
-#   hosts to physical switches. Th key is the host name that the neutron port
+#   hosts to physical switches. The key is the host name that the neutron port
 #   object will return from HOST_ID when created. The value is a switch name
 #   defined in a subsequent ansible:switch_name section and a port name
 #   separated from the switch name by a double colon (::). A single colon (:)
-#   can be used in naming ports.
+#   can be used in naming ports. For SRIOV DIRECT port attachments append the
+#   PCI address to the HOST_ID.
 # - All other sections represents a switch ansible will configure.
 #   the 'ansible:' tag will be stripped out and the rest of the section name
 #   is used as switch_name. switch_name cannot contain a :
@@ -40,6 +41,7 @@ coordination_uri = etcd://127.0.0.1:2379
 [ansible:port_mappings]
 compute1_host_name = vyos118_rack_A::switch_port_name,openswitch230_rack_23::switch_port_name
 compute2_host_name = openswitch230_rack_23::switchport_name
+compute2_host_name-37:0b = openswitch230_rack_23::port_y
 
 [ansible:vyos118_rack_A]
 ansible_network_os=vyos

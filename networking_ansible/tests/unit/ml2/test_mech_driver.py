@@ -103,6 +103,10 @@ class TestIsPortSupported(base.NetworkingAnsibleTestCase):
         self.assertTrue(
             self.mech._is_port_supported(self.mock_port_vm))
 
+    def test_is_port_supported_direct(self):
+        self.assertTrue(
+            self.mech._is_port_supported(self.mock_port_dt))
+
     def test_is_port_supported_invalid(self):
         self.mock_port_bm.dict[c.DEVICE_OWNER] = 'invalid'
         self.assertFalse(
@@ -121,6 +125,11 @@ class TestIsPortBound(base.NetworkingAnsibleTestCase):
         mock_port_supported.return_value = True
         self.assertTrue(
             self.mech._is_port_bound(self.mock_port_vm))
+
+    def test_is_port_bound_direct(self, mock_port_supported):
+        mock_port_supported.return_value = True
+        self.assertTrue(
+            self.mech._is_port_bound(self.mock_port_dt))
 
     def test_is_port_bound_not_other(self, mock_port_supported):
         self.mock_port_bm.dict['binding:vif_type'] = 'not-other'
@@ -372,6 +381,25 @@ class TestUpdatePortPostCommit(base.NetworkingAnsibleTestCase):
             self.mock_port_context,
             self.testsegid)
 
+    def test_update_port_postcommit_port_w_direct_port(self,
+                                                       mock_ensure_port,
+                                                       mock_prov_blocks,
+                                                       mock_port_bound):
+        mappings = [(self.testhost, self.testport)]
+        sriov_host_id = '{}-{}'.format(self.test_hostid, self.test_pci_addr)
+        self.m_config.port_mappings = {sriov_host_id: mappings}
+        self.mock_port_context.current = self.mock_port_dt
+        self.mock_port_context.original = self.mock_port_dt
+        self.mech.update_port_postcommit(self.mock_port_context)
+        mock_ensure_port.assert_called_once_with(
+            self.mock_port_context.current,
+            self.mock_port_context._plugin_context,
+            self.testhost,
+            self.testport,
+            self.testphysnet,
+            self.mock_port_context,
+            self.testsegid)
+
 
 class TestLinkInfo(base.NetworkingAnsibleTestCase):
     def test_switch_meta_from_link_info_obj_no_net(self):
@@ -412,7 +440,7 @@ class TestLinkInfo(base.NetworkingAnsibleTestCase):
             self.assertEqual(segmentation_id, self.testsegid)
 
     def test_switch_meta_from_link_info_context_no_name(self):
-        self.mock_port_bm.bindings[0].profile = self.lli_no_info
+        self.mock_port_bm.bindings[0].profile = self.profile_lli_no_info
         self.m_config.mac_map = {self.testmac.upper(): self.testhost + '+map'}
         mappings, segmentation_id = \
             self.mech._switch_meta_from_link_info(
@@ -701,12 +729,12 @@ class TestEnsurePort(base.NetworkingAnsibleTestCase):
 
     @mock.patch('network_runner.api.NetworkRunner.delete_trunk_vlan')
     @mock.patch.object(ports.Port, 'get_objects')
-    def test_ensure_port_no_delete_w_active_ports(self,
-                                                  mock_get_objects,
-                                                  mock_delete_vlan,
-                                                  mock_has_host,
-                                                  mock_port_get_object,
-                                                  mock_get_lock):
+    def test_ensure_port_no_delete_w_active_ports_vm(self,
+                                                     mock_get_objects,
+                                                     mock_delete_vlan,
+                                                     mock_has_host,
+                                                     mock_port_get_object,
+                                                     mock_get_lock):
         '''
         Check if there are port bindings associated with the same
         compute host that the port is being deleted from. If there
@@ -721,6 +749,70 @@ class TestEnsurePort(base.NetworkingAnsibleTestCase):
                               self.testport,
                               self.testphysnet,
                               self.mock_port_vm,
+                              self.testsegid,
+                              delete=True)
+        mock_delete_vlan.assert_not_called()
+
+    @mock.patch('network_runner.api.NetworkRunner.delete_trunk_vlan')
+    @mock.patch.object(ports.Port, 'get_objects')
+    def test_ensure_port_direct_port_delete_true(self,
+                                                 mock_get_objects,
+                                                 mock_delete_vlan,
+                                                 mock_has_host,
+                                                 mock_port_get_object,
+                                                 mock_get_lock):
+        self.mech.ensure_port(self.mock_port_dt,
+                              self.mock_port_dt,
+                              self.testhost,
+                              self.testport,
+                              self.testphysnet,
+                              self.mock_port_dt,
+                              self.testsegid,
+                              delete=True)
+        mock_delete_vlan.assert_called_with(self.testhost,
+                                            self.testport,
+                                            self.testsegid)
+
+    @mock.patch('network_runner.api.NetworkRunner.delete_trunk_vlan')
+    @mock.patch.object(ports.Port, 'get_objects')
+    @mock.patch.object(network.Network, 'get_object')
+    def test_ensure_port_no_delete_w_active_ports_dt(self,
+                                                     mock_get_object,
+                                                     mock_get_objects,
+                                                     mock_delete_vlan,
+                                                     mock_has_host,
+                                                     mock_port_get_object,
+                                                     mock_get_lock):
+        '''
+        Check if there are port bindings associated with the same
+        compute host that the port is being deleted from. If there
+        are other port bindings on that compute node make sure that
+        the vlan won't be deleted from the compute node's switchport
+        so that the other portbindings don't loose connectivity
+        '''
+        # Setup port mappings with an SRIOV designation in it
+        mappings = [(self.testhost, self.testport)]
+        sriov_host_id = '{}-{}'.format(self.test_hostid, self.test_pci_addr)
+        sriov_host_id2 = '{}-{}'.format(self.test_hostid, self.test_pci_addr2)
+        self.m_config.port_mappings = {sriov_host_id: mappings,
+                                       sriov_host_id2: mappings}
+
+        mock_get_object.return_value = self.mock_net
+
+        # Reuse VM port by reassigning it DIRECT properties
+        self.mock_port_vm.dict[portbindings.VNIC_TYPE] = \
+            portbindings.VNIC_DIRECT
+        self.mock_port_vm.dict[portbindings.PROFILE] = \
+            self.profile_pci_slot2
+        self.mock_port_vm.bindings = [self.mock_portbind_dt]
+        mock_get_objects.return_value = [self.mock_port_vm]
+
+        self.mech.ensure_port(self.mock_port_dt,
+                              self.mock_port_dt,
+                              self.testhost,
+                              self.testport,
+                              self.testphysnet,
+                              self.mock_port_dt,
                               self.testsegid,
                               delete=True)
         mock_delete_vlan.assert_not_called()

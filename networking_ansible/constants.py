@@ -26,7 +26,8 @@ COMPUTE_NOVA = 'compute:nova'
 BAREMETAL_NONE = 'baremetal:none'
 SUPPORTED_OWNERS = (BAREMETAL_NONE, COMPUTE_NOVA)
 SUPPORTED_TYPES = (portbindings.VNIC_BAREMETAL,
-                   portbindings.VNIC_NORMAL)
+                   portbindings.VNIC_NORMAL,
+                   portbindings.VNIC_DIRECT)
 
 # values that will be cast to Bool in the conf process
 BOOLEANS = ['manage_vlans', 'stp_edge']

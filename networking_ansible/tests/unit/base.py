@@ -118,6 +118,8 @@ class NetworkingAnsibleTestCase(BaseTestCase):
         self.testid = uuid.uuid4()
         self.testid2 = uuid.uuid4()
         self.test_hostid = 'testhostid'
+        self.test_pci_addr = '37:0b'
+        self.test_pci_addr2 = '37:03'
 
         # Define mocked network context
         self.mock_net_context = mock.create_autospec(
@@ -129,11 +131,19 @@ class NetworkingAnsibleTestCase(BaseTestCase):
             provider_net.SEGMENTATION_ID: self.testsegid,
             provider_net.PHYSICAL_NETWORK: self.testphysnet,
         }
+        self.mock_net_context.dict = {
+        }
         self.mock_net_context._plugin_context = 'foo'
 
         # mocked network orm object
         self.mock_net = mock.create_autospec(
             network.Network).return_value
+        self.mock_net.dict = {
+            provider_net.SEGMENTATION_ID: self.testsegid
+        }
+        self.mock_net.get = mock.Mock(
+            side_effect=lambda x, y:
+            self.mock_net.dict[x] if x in self.mock_net.dict else y)
         self.mock_netseg = mock.Mock(spec=network.NetworkSegment)
         self.mock_netseg.segmentation_id = self.testsegid
         self.mock_netseg.physical_network = self.testphysnet
@@ -154,18 +164,25 @@ class NetworkingAnsibleTestCase(BaseTestCase):
 
         # Binding profile dicts with
         # Local Link Information dicts
-        self.lli_no_mac = {
+        self.profile_lli_no_mac = {
             'local_link_information': [{
                 'switch_info': self.testhost,
                 'port_id': self.testport,
             }]
         }
-        self.lli_no_info = {
+        self.profile_lli_no_info = {
             'local_link_information': [{
                 'switch_id': self.testmac,
                 'port_id': self.testport,
-                }]
-            }
+            }]
+        }
+        # SRIOV profile
+        self.profile_pci_slot = {
+            'pci_slot': '0000:{}'.format(self.test_pci_addr)
+        }
+        self.profile_pci_slot2 = {
+            'pci_slot': '0000:{}'.format(self.test_pci_addr2)
+        }
 
         # Mocked trunk port and subport objects
         self.mock_trunk = mock.Mock(spec=trunk.Trunk)
@@ -204,19 +221,51 @@ class NetworkingAnsibleTestCase(BaseTestCase):
         }
         self.mock_port_vm.__getitem__ = mock.Mock(
             side_effect=lambda x: self.mock_port_vm.dict[x])
+        self.mock_port_vm.get = mock.Mock(
+            side_effect=lambda x, y:
+            self.mock_port_vm.dict[x] if x in self.mock_port_vm.dict else y)
+
+        self.mock_port_dt = mock.create_autospec(
+            ports.Port).return_value
+        self.mock_port_dt.network_id = self.testid2
+        self.mock_port_dt.dict = {
+            'id': self.testid,
+            'network_id': uuid.uuid4(),
+            'mac_address': self.testmac,
+            c.DEVICE_OWNER: c.COMPUTE_NOVA,
+            portbindings.VIF_TYPE: portbindings.VIF_TYPE_OVS,
+            portbindings.VNIC_TYPE: portbindings.VNIC_DIRECT,
+            portbindings.HOST_ID: self.test_hostid,
+            portbindings.PROFILE: self.profile_pci_slot
+        }
+        self.mock_port_dt.__getitem__ = mock.Mock(
+            side_effect=lambda x: self.mock_port_dt.dict[x])
+        self.mock_port_dt.get = mock.Mock(
+            side_effect=lambda x, y:
+            self.mock_port_dt.dict[x] if x in self.mock_port_dt.dict else y)
 
         self.mock_ports = [self.mock_port_bm]
 
         # Mocked port bindings
-        self.mock_portbind = mock.Mock(spec=ports.PortBinding)
-        self.mock_portbind.profile = self.lli_no_mac
-        self.mock_portbind.dict = {'host': self.test_hostid}
-        self.mock_portbind.vnic_type = 'baremetal'
-        self.mock_portbind.vif_type = 'other'
-        self.mock_portbind.__getitem__ = mock.Mock(
-            side_effect=lambda x: self.mock_portbind.dict[x])
+        self.mock_portbind_bm = mock.Mock(spec=ports.PortBinding)
+        self.mock_portbind_bm.profile = self.profile_lli_no_mac
+        self.mock_portbind_bm.dict = {'host': self.test_hostid}
+        self.mock_portbind_bm.vnic_type = 'baremetal'
+        self.mock_portbind_bm.vif_type = 'other'
+        self.mock_portbind_bm.__getitem__ = mock.Mock(
+            side_effect=lambda x: self.mock_portbind_bm.dict[x])
 
-        self.mock_port_bm.bindings = [self.mock_portbind]
+        self.mock_port_bm.bindings = [self.mock_portbind_bm]
+
+        self.mock_portbind_dt = mock.Mock(spec=ports.PortBinding)
+        self.mock_portbind_dt.profile = self.profile_lli_no_mac
+        self.mock_portbind_dt.dict = {'host': self.test_hostid}
+        self.mock_portbind_dt.vnic_type = portbindings.VNIC_DIRECT
+        self.mock_portbind_dt.vif_type = portbindings.VIF_TYPE_OVS
+        self.mock_portbind_dt.__getitem__ = mock.Mock(
+            side_effect=lambda x: self.mock_portbind_dt.dict[x])
+
+        self.mock_port_dt.bindings = [self.mock_portbind_dt]
 
         # define mocked port context
         # This isn't a true representation of a real
